@@ -1,7 +1,7 @@
 from omnigibson.sensors.vision_sensor import VisionSensor
 import transform_utils as T
 import numpy as np
-
+import torch
 class OGCamera:
     """
     Defines the camera class
@@ -97,9 +97,12 @@ def pixel_to_3d_points(depth_image, intrinsics, extrinsics):
     cx, cy = intrinsics[0, 2], intrinsics[1, 2]
 
     # Convert pixel coordinates to normalized camera coordinates
+    if torch.is_tensor(depth_image):
+        depth_image = depth_image.detach().cpu().numpy()
     z = depth_image
     x = (i - cx) * z / fx
     y = (j - cy) * z / fy
+
 
     # Stack the coordinates to form (H, W, 3)
     camera_coordinates = np.stack((x, y, z), axis=-1)

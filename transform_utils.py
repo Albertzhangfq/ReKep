@@ -178,7 +178,7 @@ def quat_conjugate(quaternion):
     """
     return np.array(
         (-quaternion[0], -quaternion[1], -quaternion[2], quaternion[3]),
-        dtype=quaternion.dtype,
+        dtype=np.float32,
     )
 
 
@@ -444,6 +444,7 @@ def mat2euler(rmat):
     return R.from_matrix(M).as_euler("xyz")
 
 
+import torch
 def pose2mat(pose):
     """
     Converts pose to homogeneous matrix.
@@ -455,6 +456,10 @@ def pose2mat(pose):
     Returns:
         np.array: 4x4 homogeneous matrix
     """
+    print("***pose = ", pose)
+    if isinstance(pose[0], torch.Tensor):
+        pose = [p.detach().cpu().numpy() if isinstance(p, torch.Tensor) else p for p in pose]
+        
     homo_pose_mat = np.zeros((4, 4), dtype=pose[0].dtype)
     homo_pose_mat[:3, :3] = quat2mat(pose[1])
     homo_pose_mat[:3, 3] = np.array(pose[0], dtype=pose[0].dtype)

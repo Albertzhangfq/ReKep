@@ -57,9 +57,9 @@ class Main:
     def perform_task(self, instruction, rekep_program_dir=None, disturbance_seq=None):
         self.env.reset()
         cam_obs = self.env.get_cam_obs()
-        rgb = cam_obs[self.config['vlm_camera']]['rgb']
+        rgb = cam_obs[self.config['vlm_camera']]['rgb'].cpu().numpy()
         points = cam_obs[self.config['vlm_camera']]['points']
-        mask = cam_obs[self.config['vlm_camera']]['seg']
+        mask = cam_obs[self.config['vlm_camera']]['seg'].cpu().numpy()
         # ====================================
         # = keypoint proposal and constraint generation
         # ====================================
