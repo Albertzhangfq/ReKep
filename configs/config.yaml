@@ -38,11 +38,15 @@ env:
       action_normalize: False
       position: [-0.8, 0.0, 0.]
       grasping_mode: assisted
-
+      #This controller expects 6DOF delta commands (dx, dy, dz, dax, day, daz), where the delta orientation commands are in axis-angle form, and outputs low-level torque commands.
       controller_config:
         base:
           name: DifferentialDriveController
         arm_0:
+        #OSC控制器 convert (delta or absolute) EEF commands into joint efforts
+        #1.根据@command_input_limits 和@command_output_limits 剪辑 + 缩放输入的命令
+        #2.运行OSC以支持所需任务框架命令的joint力
+        #3.根据电机（力度）限制来剪辑生成的命令
           name: OperationalSpaceController
           kp: 250
           kp_limits: [50, 400]
@@ -53,7 +57,7 @@ env:
           mode: smooth
         camera:
           name: JointController
-
+        # 机载摄像头
   camera:
     # recorder 
     1:
@@ -101,7 +105,8 @@ keypoint_proposer:
   seed: *seed
 
 constraint_generator:
-  model: chatgpt-4o-latest
+  model: gpt-4o-mini
+  #chatgpt-4o-latest
   temperature: 0.0
   max_tokens: 2048
 

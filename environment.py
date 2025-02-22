@@ -370,6 +370,7 @@ class ReKepOGEnv:
             # ======================================
             # = interpolation
             # ======================================
+            # 判断目前是否接近目标位姿，如果不近，那么就进行位姿插值
             current_pose = self.get_ee_pose()
             pos_diff = np.linalg.norm(current_pose[:3] - target_pose[:3])
             rot_diff = angle_between_quats(current_pose[3:7], target_pose[3:7])

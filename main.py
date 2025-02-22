@@ -33,9 +33,12 @@ class Main:
         np.random.seed(self.config['seed'])
         torch.manual_seed(self.config['seed'])
         torch.cuda.manual_seed(self.config['seed'])
+        
         # initialize keypoint proposer and constraint generator
         self.keypoint_proposer = KeypointProposer(global_config['keypoint_proposer'])
         self.constraint_generator = ConstraintGenerator(global_config['constraint_generator'])
+        
+        # 下面均为仿真启动
         # initialize environment
         self.env = ReKepOGEnv(global_config['env'], scene_file, verbose=False)
         # setup ik solver (for reachability cost)
@@ -56,7 +59,9 @@ class Main:
 
     def perform_task(self, instruction, rekep_program_dir=None, disturbance_seq=None):
         self.env.reset()
+        # 获取模拟环境中的相机obs
         cam_obs = self.env.get_cam_obs()
+        # config.yaml 里的main    分为vlm_camera: 0，recorder：1
         rgb = cam_obs[self.config['vlm_camera']]['rgb'].cpu().numpy()
         points = cam_obs[self.config['vlm_camera']]['points']
         mask = cam_obs[self.config['vlm_camera']]['seg'].cpu().numpy()
@@ -64,16 +69,24 @@ class Main:
         # = keypoint proposal and constraint generation
         # ====================================
         if rekep_program_dir is None:
+            # 生成keypoint和点云投影图
             keypoints, projected_img = self.keypoint_proposer.get_keypoints(rgb, points, mask)
             print(f'{bcolors.HEADER}Got {len(keypoints)} proposed keypoints{bcolors.ENDC}')
             if self.visualize:
                 self.visualizer.show_img(projected_img)
+            # 保存keypoint的位置和个数
             metadata = {'init_keypoint_positions': keypoints, 'num_keypoints': len(keypoints)}
+            
+            # 接受keypoint的metadata，大模型的instuction和投影图，生成constraint
+            # 见下面的task_list，默认使用cache时，'rekep_program_dir': './vlm_query/pen',否则None
             rekep_program_dir = self.constraint_generator.generate(projected_img, instruction, metadata)
             print(f'{bcolors.HEADER}Constraints generated{bcolors.ENDC}')
         # ====================================
         # = execute
         # ====================================
+        
+        
+        # 换机器人和实机部署需要大改特改，接受rekep的constraint函数和扰动序列
         self._execute(rekep_program_dir, disturbance_seq)
 
     def _update_disturbance_seq(self, stage, disturbance_seq):
@@ -84,7 +97,7 @@ class Main:
                 self.applied_disturbance[stage] = True
 
     def _execute(self, rekep_program_dir, disturbance_seq=None):
-        # load metadata
+        # load metadata，主要是keypoint和投影图等信息
         with open(os.path.join(rekep_program_dir, 'metadata.json'), 'r') as f:
             self.program_info = json.load(f)
         self.applied_disturbance = {stage: False for stage in range(1, self.program_info['num_stages'] + 1)}
@@ -99,15 +112,16 @@ class Main:
                 get_grasping_cost_fn = get_callable_grasping_cost_fn(self.env)  # special grasping function for VLM to call
                 stage_dict[constraint_type] = load_functions_from_txt(load_path, get_grasping_cost_fn) if os.path.exists(load_path) else []
             self.constraint_fns[stage] = stage_dict
-        
+        # 记录哪些关键点一定可动，其中第一个关键点是ee一定可动
         # bookkeeping of which keypoints can be moved in the optimization
         self.keypoint_movable_mask = np.zeros(self.program_info['num_keypoints'] + 1, dtype=bool)
         self.keypoint_movable_mask[0] = True  # first keypoint is always the ee, so it's movable
 
-        # main loop
+        # main loop，仿真环境中
         self.last_sim_step_counter = -np.inf
         self._update_stage(1)
         while True:
+            # 通过不断循环，从环境中获得ee和joint位置和位姿，以及sdf体素和碰撞点
             scene_keypoints = self.env.get_keypoint_positions()
             self.keypoints = np.concatenate([[self.env.get_ee_pos()], scene_keypoints], axis=0)  # first keypoint is always the ee
             self.curr_ee_pose = self.env.get_ee_pose()
@@ -117,7 +131,7 @@ class Main:
             # ====================================
             # = decide whether to backtrack
             # ====================================
-            backtrack = False
+            backtrack = False#分支回退进行优化。遇到不符合constraint时进行回溯，重新优化
             if self.stage > 1:
                 path_constraints = self.constraint_fns[self.stage]['path']
                 for constraints in path_constraints:
@@ -161,6 +175,15 @@ class Main:
                 # = execute
                 # ====================================
                 # determine if we proceed to the next stage
+                
+                # 他的main函数里的exectute，是通过action_queue和env.execute_action实现的
+                # execute的基本逻辑是_move_to_waypoint, 先convert world pose to robot pose
+                # 再convert to relative position/quat->axisangle,分别给action4：7,7：10用于_step
+                # _step调用og_env.step  返回5-tuple:dict: state, float: reward,bool: terminated, dict: info
+                # og_env.step实际操作调用_pre_step,og.sim.step和_post_step
+                # 其中_pre_step采用robot.apply_action
+                # 这里的action是gripper的位姿，用四元数表示，怎么判断grasp和release的
+                
                 count = 0
                 while len(self.action_queue) > 0 and count < self.config['action_steps_per_iter']:
                     next_action = self.action_queue.pop(0)
@@ -222,6 +245,7 @@ class Main:
         return processed_path
 
     def _process_path(self, path):
+        # 进行插值，应该和机械臂类型有关，因为要插值ee的action
         # spline interpolate the path from the current ee pose
         full_control_points = np.concatenate([
             self.curr_ee_pose.reshape(1, -1),
@@ -234,6 +258,7 @@ class Main:
         # add gripper action
         ee_action_seq = np.zeros((dense_path.shape[0], 8))
         ee_action_seq[:, :7] = dense_path
+        #最后一个位置加上0
         ee_action_seq[:, 7] = self.env.get_gripper_null_action()
         return ee_action_seq
 
@@ -365,6 +390,7 @@ if __name__ == "__main__":
             yield disturbance(counter)
             counter += 1
 
+    # 换任务时需要大改
     task_list = {
         'pen': {
             'scene_file': './configs/og_scene_file_pen.json',

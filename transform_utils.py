@@ -156,7 +156,7 @@ def quat_multiply(quaternion1, quaternion0):
             x1 * y0 - y1 * x0 + z1 * w0 + w1 * z0,
             -x1 * x0 - y1 * y0 - z1 * z0 + w1 * w0,
         ),
-        dtype=quaternion0.dtype,
+        dtype=np.float32,
     )
 
 
